@@ -1,13 +1,14 @@
 """
-What's My Height? — Streamlit application entry point.
+What's My Height? — Gradio application entry point.
 
 Run with:
-    streamlit run app.py
+    python app.py
 """
 
 import os
 
-import streamlit as st
+import gradio as gr
+import pandas as pd
 from PIL import Image
 
 from model.load_model import get_model
@@ -20,119 +21,132 @@ from utils import history as hist
 # ---------------------------------------------------------------------------
 WEIGHTS_PATH = os.path.join("model", "fold00001_best.weights.h5")
 
-st.set_page_config(
-    page_title="What's My Height?",
-    page_icon="📏",
-    layout="centered",
-    initial_sidebar_state="expanded",
-)
 
 # ---------------------------------------------------------------------------
-# Sidebar navigation
+# Backend functions
 # ---------------------------------------------------------------------------
-st.sidebar.title("📏 What's My Height?")
-page = st.sidebar.radio("Navigate", ["🏠 Home", "📋 History", "ℹ️ About"])
+def predict_height(image: Image.Image) -> str:
+    """Run height prediction on an uploaded PIL image.
 
-# ---------------------------------------------------------------------------
-# Page: Home — prediction
-# ---------------------------------------------------------------------------
-if page == "🏠 Home":
-    st.title("📏 Height Prediction")
-    st.write(
-        "Upload a front-view image of a person (with a checkerboard pattern "
-        "in the background for best results) and the model will estimate their height."
-    )
+    Args:
+        image: PIL Image provided by the Gradio Image component.
 
-    uploaded_file = st.file_uploader(
-        "Upload an image", type=["jpg", "jpeg", "png"], label_visibility="collapsed"
-    )
+    Returns:
+        A markdown string with the result or an error message.
+    """
+    if image is None:
+        return "⚠️ Please upload an image first."
 
-    if uploaded_file is not None:
-        try:
-            image = Image.open(uploaded_file)
-        except Exception:
-            st.error("❌ Could not open the uploaded file. Please upload a valid JPG or PNG image.")
-            st.stop()
+    try:
+        model = get_model(WEIGHTS_PATH)
+    except FileNotFoundError as exc:
+        return f"❌ {exc}"
+    except RuntimeError as exc:
+        return f"❌ {exc}"
 
-        st.image(image, caption=uploaded_file.name, use_column_width=True)
+    try:
+        img_tensor = preprocess_image(image)
+        height_cm = predict(model, img_tensor)
+        hist.add_record("uploaded_image", height_cm)
+        return f"✅ **Predicted Height: {height_cm:.1f} cm**"
+    except ValueError as exc:
+        return f"❌ Image preprocessing error: {exc}"
+    except RuntimeError as exc:
+        return f"❌ Prediction error: {exc}"
 
-        if st.button("🔍 Predict Height"):
-            # Load model (cached after first call)
-            model_loaded = True
-            model = None
-            try:
-                with st.spinner("Loading model…"):
-                    model = get_model(WEIGHTS_PATH)
-            except FileNotFoundError as exc:
-                st.error(f"❌ {exc}")
-                model_loaded = False
-            except RuntimeError as exc:
-                st.error(f"❌ {exc}")
-                model_loaded = False
 
-            if model_loaded and model is not None:
-                try:
-                    with st.spinner("Running inference…"):
-                        img_tensor = preprocess_image(image)
-                        height_cm = predict(model, img_tensor)
-
-                    st.success(f"**Predicted Height: {height_cm:.1f} cm**")
-                    hist.add_record(uploaded_file.name, height_cm)
-                except ValueError as exc:
-                    st.error(f"❌ Image preprocessing error: {exc}")
-                except RuntimeError as exc:
-                    st.error(f"❌ Prediction error: {exc}")
-
-# ---------------------------------------------------------------------------
-# Page: History
-# ---------------------------------------------------------------------------
-elif page == "📋 History":
-    st.title("📋 Prediction History")
-
+def get_history_df() -> pd.DataFrame:
+    """Return the current prediction history as a DataFrame."""
     records = hist.get_history()
     if records:
-        st.dataframe(records, use_container_width=True)
-        if st.button("🗑️ Clear History"):
-            hist.clear_history()
-            st.rerun()
-    else:
-        st.info("No predictions yet. Go to the **Home** page to get started.")
+        return pd.DataFrame(records)
+    return pd.DataFrame(columns=["Image", "Predicted Height (cm)", "Timestamp"])
+
+
+def clear_and_refresh() -> pd.DataFrame:
+    """Clear all history records and return an empty DataFrame."""
+    hist.clear_history()
+    return get_history_df()
+
 
 # ---------------------------------------------------------------------------
-# Page: About
+# Gradio UI
 # ---------------------------------------------------------------------------
-elif page == "ℹ️ About":
-    st.title("ℹ️ About")
-    st.markdown(
-        """
-        ## AI-based Anthropometric Measurement Using Deep Learning
-
-        This application estimates a person's height (in centimetres) from a
-        front-view photograph using a custom deep-learning regression model.
-
-        ### Model Architecture
-        | Component | Details |
-        |-----------|---------|
-        | Backbone | **ResNet50** (pre-trained on ImageNet) |
-        | Head | GlobalAveragePooling → Dense(512, ReLU) → Dropout(0.3) → Dense(128, ReLU) → Dropout(0.2) → Dense(1, linear) |
-        | Input size | 256 × 256 × 3 |
-        | Output | Single float — predicted height in **cm** |
-        | Framework | TensorFlow / Keras |
-
-        ### How It Works
-        1. Upload a front-view image.
-        2. The image is resized to 256 × 256 and preprocessed using ResNet50's
-           standard normalisation.
-        3. The model produces a single continuous value representing the
-           predicted height.
-
-        ### Author
-        **ShaownBuetBme** — BUET BME  
-        *Project: What's My Height? — height regression from human images*
-
-        ---
-        > **Tip:** For best accuracy, photograph the subject standing upright in
-        > front of a flat surface with a checkerboard pattern visible in the
-        > background.
-        """
+with gr.Blocks(title="What's My Height? 📏") as demo:
+    gr.Markdown("# 📏 What's My Height?")
+    gr.Markdown(
+        "AI-based height estimation from a front-view photograph using a "
+        "ResNet50 regression model."
     )
+
+    with gr.Tabs():
+        # ── Home tab ──────────────────────────────────────────────────────
+        with gr.Tab("🏠 Home"):
+            gr.Markdown(
+                "Upload a front-view image of a person (with a checkerboard "
+                "pattern in the background for best results) and click "
+                "**Predict Height**."
+            )
+            image_input = gr.Image(label="Upload Image", type="pil")
+            predict_btn = gr.Button("🔍 Predict Height", variant="primary")
+            result_output = gr.Markdown()
+
+            predict_btn.click(
+                fn=predict_height,
+                inputs=image_input,
+                outputs=result_output,
+            )
+
+        # ── History tab ───────────────────────────────────────────────────
+        with gr.Tab("📋 History"):
+            gr.Markdown("Predictions made during the current server session.")
+            history_table = gr.DataFrame(
+                value=get_history_df,
+                label="Prediction History",
+                interactive=False,
+            )
+            with gr.Row():
+                refresh_btn = gr.Button("🔄 Refresh")
+                clear_btn = gr.Button("🗑️ Clear History", variant="stop")
+
+            refresh_btn.click(fn=get_history_df, outputs=history_table)
+            clear_btn.click(fn=clear_and_refresh, outputs=history_table)
+
+        # ── About tab ─────────────────────────────────────────────────────
+        with gr.Tab("ℹ️ About"):
+            gr.Markdown(
+                """
+## AI-based Anthropometric Measurement Using Deep Learning
+
+This application estimates a person's height (in centimetres) from a
+front-view photograph using a custom deep-learning regression model.
+
+### Model Architecture
+| Component | Details |
+|-----------|---------|
+| Backbone | **ResNet50** (pre-trained on ImageNet) |
+| Head | GlobalAveragePooling → Dense(512, ReLU) → Dropout(0.3) → Dense(128, ReLU) → Dropout(0.2) → Dense(1, linear) |
+| Input size | 256 × 256 × 3 |
+| Output | Single float — predicted height in **cm** |
+| Framework | TensorFlow / Keras |
+
+### How It Works
+1. Upload a front-view image.
+2. The image is resized to 256 × 256 and preprocessed using ResNet50's
+   standard normalisation.
+3. The model produces a single continuous value representing the
+   predicted height.
+
+### Author
+**ShaownBuetBme** — BUET BME  
+*Project: What's My Height? — height regression from human images*
+
+---
+> **Tip:** For best accuracy, photograph the subject standing upright in
+> front of a flat surface with a checkerboard pattern visible in the
+> background.
+                """
+            )
+
+if __name__ == "__main__":
+    demo.launch()
