@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Model weights (large binary files — download separately)
+model/*.h5
+model/*.weights.h5
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# macOS metadata
+.DS_Store
+
+# IDE settings
+.idea/
+.vscode/
+
+# Streamlit secrets
+.streamlit/secrets.toml
