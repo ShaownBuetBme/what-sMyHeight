@@ -8,7 +8,6 @@ Run with:
 import os
 
 import gradio as gr
-import pandas as pd
 from PIL import Image
 
 from model.load_model import get_model
@@ -55,18 +54,23 @@ def predict_height(image: Image.Image) -> str:
         return f"❌ Prediction error: {exc}"
 
 
-def get_history_df() -> pd.DataFrame:
-    """Return the current prediction history as a DataFrame."""
+def get_history_rows() -> list:
+    """Return the current prediction history as row-wise values."""
     records = hist.get_history()
-    if records:
-        return pd.DataFrame(records)
-    return pd.DataFrame(columns=["Image", "Predicted Height (cm)", "Timestamp"])
+    return [
+        [
+            record["Image"],
+            record["Predicted Height (cm)"],
+            record["Timestamp"],
+        ]
+        for record in records
+    ]
 
 
-def clear_and_refresh() -> pd.DataFrame:
-    """Clear all history records and return an empty DataFrame."""
+def clear_and_refresh() -> list:
+    """Clear all history records and return empty table rows."""
     hist.clear_history()
-    return get_history_df()
+    return get_history_rows()
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +105,8 @@ with gr.Blocks(title="What's My Height? 📏") as demo:
         with gr.Tab("📋 History"):
             gr.Markdown("Predictions made during the current server session.")
             history_table = gr.DataFrame(
-                value=get_history_df,
+                headers=["Image", "Predicted Height (cm)", "Timestamp"],
+                value=get_history_rows,
                 label="Prediction History",
                 interactive=False,
             )
@@ -109,7 +114,7 @@ with gr.Blocks(title="What's My Height? 📏") as demo:
                 refresh_btn = gr.Button("🔄 Refresh")
                 clear_btn = gr.Button("🗑️ Clear History", variant="stop")
 
-            refresh_btn.click(fn=get_history_df, outputs=history_table)
+            refresh_btn.click(fn=get_history_rows, outputs=history_table)
             clear_btn.click(fn=clear_and_refresh, outputs=history_table)
 
         # ── About tab ─────────────────────────────────────────────────────
