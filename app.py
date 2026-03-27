@@ -154,4 +154,5 @@ front-view photograph using a custom deep-learning regression model.
             )
 
 if __name__ == "__main__":
-    demo.launch()
+    server_port = int(os.getenv("PORT", "7860"))
+    demo.launch(server_name="0.0.0.0", server_port=server_port)
